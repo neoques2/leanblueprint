@@ -98,7 +98,11 @@ The API documentation will be at `https://user_name.github.io/repo_name/docs/`
 
 Assuming you used the `leanblueprint` command line tool to create your blueprint
 (or at least that you use the same file layout), you can use `leanblueprint` to
-build your blueprint locally. The available commands are:
+build your blueprint locally. All commands accept the options `--lean-root PATH`
+to specify the Lean project directory and `--doc-root PATH` to specify where the
+blueprint sources live. By default the tool searches for the Lean project
+starting from the current directory and uses `<lean-root>/blueprint` for the
+sources. The available commands are:
 
 * `leanblueprint pdf` to build the pdf version (this requires a TeX installation
   of course).
