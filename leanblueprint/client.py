@@ -188,6 +188,10 @@ custom_theme = Theme({
 console = Console(theme=custom_theme)
 
 
+repo: Optional[Repo] = None
+lakefile: Optional[Lakefile] = None
+blueprint_root: Optional[Path] = None
+
 def ask(*args, **kwargs) -> str:
     kwargs.update({'console': console})
     return Prompt.ask(*args, **kwargs)
@@ -211,48 +215,41 @@ def error(msg: str) -> NoReturn:
     console.print(f"[error]Error:[/] {msg}")
     sys.exit(1)
 
-
 @click.group(cls=CustomMultiCommand, context_settings={'help_option_names': ['-h', '--help']})
 @click.option('--debug', 'python_debug', default=False, is_flag=True,
               help='Display python tracebacks in case of error.')
+@click.option('--lean-root', type=click.Path(path_type=Path, file_okay=False, resolve_path=True),
+              default=Path('.'), help='Root directory of the Lean project.')
+@click.option('--doc-root', type=click.Path(path_type=Path, file_okay=False, resolve_path=True),
+              default=None, help='Root directory of the blueprint sources.')
 @click.version_option()
-def cli(python_debug: bool) -> None:
+def cli(python_debug: bool, lean_root: Path, doc_root: Optional[Path]) -> None:
     """Command line client to manage Lean blueprints.
     Use leanblueprint COMMAND --help to get more help on any specific command."""
-    global debug
+    global debug, repo, lakefile, blueprint_root
     debug = python_debug
 
+    try:
+        repo = Repo(lean_root, search_parent_directories=True)
+    except InvalidGitRepositoryError:
+        error(f"Could not find a Lean project at {lean_root}. Please run this command from inside your project folder or specify the root with --lean-root.")
 
-# locate repo
+    assert repo is not None
 
-repo: Optional[Repo] = None
-try:
-    repo = Repo(".", search_parent_directories=True)
-except InvalidGitRepositoryError:
-    error("Could not find a Lean project. Please run this command from inside your project folder.")
+    lakefile_lean_path = Path(repo.working_dir)/"lakefile.lean"
+    lakefile_toml_path = Path(repo.working_dir)/"lakefile.toml"
 
-assert repo is not None
+    if lakefile_lean_path.exists() and lakefile_toml_path.exists():
+        warning("Both lakefile.lean and lakefile.toml exist; using lakefile.lean")
+        lakefile = LakefileLean(lakefile_lean_path)
+    elif lakefile_lean_path.exists():
+        lakefile = LakefileLean(lakefile_lean_path)
+    elif lakefile_toml_path.exists():
+        lakefile = LakefileToml(lakefile_toml_path)
+    else:
+        error(f"Could not find lakefile.lean or lakefile.toml in {repo.working_dir}")
 
-# locate lakefile
-
-lakefile_lean_path = Path(repo.working_dir)/"lakefile.lean"
-lakefile_toml_path = Path(repo.working_dir)/"lakefile.toml"
-
-lakefile: Optional[Lakefile] = None
-
-if lakefile_lean_path.exists() and lakefile_toml_path.exists():
-    warning("Both lakefile.lean and lakefile.toml exist; using lakefile.lean")
-    lakefile = LakefileLean(lakefile_lean_path)
-elif lakefile_lean_path.exists():
-    lakefile = LakefileLean(lakefile_lean_path)
-elif lakefile_toml_path.exists():
-    lakefile = LakefileToml(lakefile_toml_path)
-else:
-    error(f"Could not find lakefile.lean or lakefile.toml in {repo.working_dir}")
-
-# blueprint root directory
-
-blueprint_root = Path(repo.working_dir)/"blueprint"
+    blueprint_root = doc_root if doc_root is not None else Path(repo.working_dir)/"blueprint"
 
 @cli.command()
 def new() -> None:
@@ -464,6 +461,7 @@ def new() -> None:
         console.print("\nYou are all set :tada:\n")
 
 def mk_pdf() -> None:
+    assert blueprint_root is not None
     (blueprint_root/"print").mkdir(exist_ok=True)
     subprocess.run("latexmk -output-directory=../print", cwd=str(
         blueprint_root/"src"), check=True, shell=True)
@@ -480,6 +478,7 @@ def pdf() -> None:
 
 
 def mk_web() -> None:
+    assert blueprint_root is not None
     (blueprint_root/"web").mkdir(exist_ok=True)
     subprocess.run("plastex -c plastex.cfg web.tex",
                    cwd=str(blueprint_root/"src"), check=True, shell=True)
@@ -491,6 +490,7 @@ def web() -> None:
     mk_web()
 
 def do_checkdecls() -> None:
+    assert blueprint_root is not None
     subprocess.run("lake exe checkdecls blueprint/lean_decls",
                    cwd=str(blueprint_root.parent), check=True, shell=True)
 
@@ -510,6 +510,7 @@ def all() -> None:
     """
     mk_pdf()
     mk_web()
+    assert blueprint_root is not None
     subprocess.run("lake build",
                    cwd=str(blueprint_root.parent), check=True, shell=True)
     do_checkdecls()
@@ -523,6 +524,7 @@ def serve() -> None:
 
     This is useful is order to see the dependency graph in particular.
     """
+    assert blueprint_root is not None
     cwd = os.getcwd()
     os.chdir(blueprint_root/'web')
     Handler = http.server.SimpleHTTPRequestHandler
